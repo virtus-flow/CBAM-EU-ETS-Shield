@@ -130,7 +130,7 @@ carbon-shield-cbam/
     }
 }
 ```
-## 🛠️ Technologies
+## 🛠️ **Technologies**
 
 | Technology | Purpose |
 |------------|---------|
@@ -142,6 +142,44 @@ carbon-shield-cbam/
 | **yfinance** | Live EUA price feed |
 | **SciPy** | Numerical solvers (MLE calibration) |
 
-## 📊 Screenshots
+## 📊 **Screenshots**
+
+![Carbon Shield Dashboard](Dashboard1.jpg)
+![Carbon Shield Dashboard](Dashboard2.jpg)
+![Carbon Shield Dashboard](Dashboard3.jpg)
+![Carbon Shield Dashboard](Dashboard4.jpg)
+![Carbon Shield Dashboard](Dashboard5.jpg)
+![Carbon Shield Dashboard](Dashboard6.jpg)
+
+
+##🤝 **Contributing**
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (git checkout -b feature/amazing-feature)
+3. Commit your changes (git commit -m 'Add some amazing feature')
+4. Push to the branch (git push origin feature/amazing-feature)
+5. Open a Pull Request
+
+## 📄 **License**
+
+Distributed under the MIT License. See LICENSE file for more information.
+
+## 📬 **Contact**
+
+Ognjen Raketić, M.Sc.
+LinkedIn: [Ognjen][linkedin.com/in/ognjen-raketic]
+Email: [ognjen.raketic@gmail.com]
+GitHub: [github.com/virtus-flow]
+
+
+## 🙏 **Acknowledgments**
+
+* [Prof. Enrico Zio (Politecnico di Milano)][https://scholar.google.com/citations?hl=en&user=Fz_uKmYAAAAJ] – for supervising the research on stochastic reliability modeling
+* [POLIMI Graduate School of Management – Skills for Transition Bootcamp][https://www.gsom.polimi.it/en/course/skills-for-transition/]
+* [UniCredit Group – for funding the program][https://www.unicreditgroup.eu/en.html]
+
+<div align="center"> <sub>Built with ❤️ for the green transition</sub> </div> ```
 
 
