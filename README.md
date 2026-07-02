@@ -107,6 +107,7 @@ carbon-shield-cbam/
 ├── requirements.txt
 └── README.md
 ```
+---
 ## ⚙️ Configuration
 
    ```py
