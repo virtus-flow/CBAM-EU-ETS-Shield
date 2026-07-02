@@ -170,7 +170,7 @@ carbon-shield-cbam/
 | 🔜 | Docker containerization |
 | 🔜 | REST API wrapper (FastAPI) |
 
-##🤝 **Contributing**
+## 🤝 **Contributing**
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
