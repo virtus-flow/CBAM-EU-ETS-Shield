@@ -98,12 +98,13 @@ Compares two scenarios:
 ## 📁 Repository Structure
 
 carbon-shield-cbam/
-├── streamlit_app.py          # Main application
-├── requirements.txt          # Python dependencies
-├── README.md                 # This file
-├── LICENSE                   # MIT License
-└── .streamlit/
-    └── config.toml           # Streamlit theme config (optional)
+├── screenshots/
+│   ├── dashboard.png
+│   ├── results.png
+│   └── knowledge_graph.png
+├── streamlit_app.py
+├── requirements.txt
+└── README.md
 
 ## ⚙️ Configuration
 
