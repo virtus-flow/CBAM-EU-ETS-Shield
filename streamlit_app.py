@@ -1,6 +1,6 @@
 # ==============================================================================
 # CARBON SHIELD – EU ETS + CBAM Risk Management Tool
-# Streamlit Application – Version 2.7 (CBAM Full Compliance)
+# Streamlit Application – Version 2.7.1 (Production range extended)
 # ==============================================================================
 
 import streamlit as st
@@ -63,11 +63,10 @@ CONFIG = {
             "Hydrogen": 0.0
         },
         "default_benchmark": 1.328,
-        # Dodat: podaci o uvoznim sirovinama (prekursorima)
         "imported_materials": {
             "Steel": {
-                "emission_intensity": 1.85,   # tCO2e / t sirovine
-                "usage_per_tonne": 0.8        # t sirovine / t finalnog proizvoda
+                "emission_intensity": 1.85,
+                "usage_per_tonne": 0.8
             },
             "Cement": {
                 "emission_intensity": 0.75,
@@ -101,12 +100,10 @@ CONFIG = {
 }
 
 # ==============================================================================
-# 1. CORE CLASSES
+# 1. CORE CLASSES (nepromenjeno)
 # ==============================================================================
 
-# ---- EUA Price Fetcher (sa keširanjem) ----
 def get_live_eua_price():
-    """Fetch live EUA price from Yahoo Finance."""
     try:
         tickers = CONFIG["eua"]["yfinance_tickers"]
         eur_usd = CONFIG["eua"]["eur_usd"]
@@ -116,7 +113,6 @@ def get_live_eua_price():
                 hist = ticker.history(period="5d")
                 if not hist.empty:
                     price_usd = hist['Close'].iloc[-1]
-                    # Try live EUR/USD
                     try:
                         eur_ticker = yf.Ticker("EURUSD=X")
                         eur_hist = eur_ticker.history(period="1d")
@@ -133,10 +129,8 @@ def get_live_eua_price():
 
 @st.cache_data(ttl=300)
 def get_live_eua_price_cached():
-    """Cached version of EUA price fetcher."""
     return get_live_eua_price()
 
-# ---- Stochastic Kernel ----
 class AramisAlfaPulseKernel:
     def __init__(self, config):
         self.config = config
@@ -181,7 +175,6 @@ class AramisAlfaPulseKernel:
                 tau_hat_triggered[j] = True
         return self.lambda_vector.copy(), tau_hat_triggered
 
-# ---- ETS Engine ----
 class ETSComplianceEngine:
     def __init__(self, config):
         self.config = config
@@ -191,12 +184,10 @@ class ETSComplianceEngine:
 
     def calculate(self, production_volume, eua_price, free_allowances,
                   lambda_avg=0.0, shock_multiplier=0.0):
-        # Input validation
         if production_volume <= 0:
             raise ValueError("Production volume must be > 0")
         if eua_price <= 0:
             raise ValueError("EUA price must be > 0")
-
         intensity = self.base_intensity * (1 + lambda_avg * self.lambda_factor)
         scope1_shock = shock_multiplier * production_volume / 10000.0
         A = np.array([[0.05, 0.10, 0.20],
@@ -216,7 +207,6 @@ class ETSComplianceEngine:
             "risk_eur": risk_eur
         }
 
-# ---- CBAM Calculator (ispravljen) ----
 class CBAMCalculator:
     def __init__(self, config):
         self.config = config
@@ -226,10 +216,6 @@ class CBAMCalculator:
     def calculate(self, total_carbon, production_volume, eua_price,
                   benchmark=None, product_category="Steel",
                   imported_intensity=None, imported_usage=None):
-        """
-        Računa ugrađene emisije u skladu sa CBAM metodologijom:
-        embedded = internal_emissions + (imported_intensity * imported_usage)
-        """
         if production_volume <= 0:
             return {
                 "embedded_emissions_per_tonne": 0.0,
@@ -241,28 +227,17 @@ class CBAMCalculator:
                 "cbam_liability": 0.0,
                 "product_category": product_category
             }
-
-        # 1. Interne emisije (Scope 1 + 2) po toni finalnog proizvoda
         internal_emissions = total_carbon / production_volume
-
-        # 2. Ako korisnik nije uneo vrednosti, uzmi iz CONFIG-a (default)
         if imported_intensity is None:
             imported_intensity = self.imported_data.get(product_category, {}).get("emission_intensity", 0.0)
         if imported_usage is None:
             imported_usage = self.imported_data.get(product_category, {}).get("usage_per_tonne", 0.0)
-
-        # 3. Emisije iz uvezenih sirovina (prekursora)
         imported_emissions = imported_intensity * imported_usage
-
-        # 4. Ukupne ugrađene emisije
         embedded = internal_emissions + imported_emissions
-
-        # 5. Benchmark i obaveza
         if benchmark is None:
             benchmark = self.benchmarks.get(product_category, 1.0)
         excess = max(0.0, embedded - benchmark)
         liability = excess * production_volume * eua_price
-
         return {
             "embedded_emissions_per_tonne": embedded,
             "internal_emissions_per_tonne": internal_emissions,
@@ -279,12 +254,10 @@ class CBAMCalculator:
 # ==============================================================================
 
 def main():
-    # Header
     st.title("🛡️ Carbon Shield – EU ETS & CBAM Risk Manager")
     st.markdown("**Professional EU ETS Risk Management System with CBAM Integration**")
     st.markdown("---")
 
-    # Sidebar
     with st.sidebar:
         st.header("⚙️ Parameters")
 
@@ -292,13 +265,12 @@ def main():
         prod_vol = st.number_input(
             "Production Volume (tonnes)",
             value=CONFIG["simulation"]["default_production"],
-            min_value=500,
+            min_value=100,          # <-- PROMENA: sa 500 na 100
             max_value=50000,
             step=500,
             help="Total production volume in tonnes"
         )
 
-        # Live EUA price with caching
         live_price = get_live_eua_price_cached()
         default_eua = live_price if live_price is not None else CONFIG["eua"]["fallback_price"]
         eua_price = st.number_input(
@@ -321,7 +293,6 @@ def main():
 
         st.markdown("---")
 
-        # Sensitivity
         trigger_threshold = st.slider(
             "Trigger Threshold (Cascade)",
             min_value=0.30,
@@ -331,7 +302,6 @@ def main():
             help="Lambda threshold for cascade detection (lower = more sensitive)"
         )
 
-        # Water / Anomaly
         st.subheader("🌊 Water Emissions")
         water_base = st.slider(
             "Water Emission Base (m³)",
@@ -357,7 +327,6 @@ def main():
 
         st.markdown("---")
 
-        # PPA
         st.subheader("⚡ PPA Strategy")
         spot_price = st.slider(
             "Spot Energy Price (EUR/MWh)",
@@ -376,7 +345,6 @@ def main():
 
         st.markdown("---")
 
-        # CBAM
         st.subheader("📊 CBAM Settings")
         product_category = st.selectbox(
             "Product Category",
@@ -384,7 +352,6 @@ def main():
             index=0
         )
 
-        # Benchmark
         default_benchmark = CONFIG["cbam"]["benchmarks"].get(product_category, 1.0)
         cbam_benchmark = st.number_input(
             "CBAM Benchmark (tCO2/tonne)",
@@ -395,7 +362,6 @@ def main():
             help="EU benchmark for embedded emissions (lower = stricter)"
         )
 
-        # Imported materials (prekursori)
         st.subheader("📦 Imported Materials (Precursors)")
         default_intensity = CONFIG["cbam"]["imported_materials"].get(product_category, {}).get("emission_intensity", 0.0)
         default_usage = CONFIG["cbam"]["imported_materials"].get(product_category, {}).get("usage_per_tonne", 0.0)
@@ -417,7 +383,6 @@ def main():
             help="How many tonnes of imported material are used per tonne of final product"
         )
 
-        # Simulation steps
         n_steps = st.slider(
             "Simulation Steps",
             min_value=10,
@@ -429,22 +394,15 @@ def main():
         st.markdown("---")
         run_button = st.button("🚀 Run Simulation", use_container_width=True, type="primary")
 
-    # Main area
     if run_button:
         with st.spinner("🧮 Running simulation..."):
             try:
-                # Set random seed for reproducibility
                 np.random.seed(42)
-
-                # Instantiate components
                 kernel = AramisAlfaPulseKernel(CONFIG)
                 engine = ETSComplianceEngine(CONFIG)
                 cbam = CBAMCalculator(CONFIG)
-
-                # Apply dynamic threshold
                 kernel.trigger_threshold = trigger_threshold
 
-                # Run simulation
                 records = []
                 for t in range(n_steps):
                     base_signal = water_base / 1000.0
@@ -461,7 +419,6 @@ def main():
                         shock_multiplier=shock
                     )
 
-                    # CBAM proračun sa ispravkom
                     cbam_res = cbam.calculate(
                         result["total_carbon"],
                         prod_vol,
@@ -489,10 +446,7 @@ def main():
                 df = pd.DataFrame(records)
                 last = df.iloc[-1]
 
-                # ----- RESULTS DISPLAY -----
                 st.markdown("## 📊 Simulation Results")
-
-                # Key metrics
                 col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Total Carbon", f"{last['total_carbon']:,.2f} tCO2e")
@@ -506,7 +460,6 @@ def main():
                     cascade_status = "🔴 YES" if last['triggered_any'] else "🟢 NO"
                     st.metric("Cascade Detected", cascade_status)
 
-                # CBAM breakdown
                 st.markdown("### 🔍 CBAM Embedded Emissions Breakdown")
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -517,10 +470,7 @@ def main():
                     st.metric("Total embedded", f"{last['embedded_emissions_per_tonne']:.3f} tCO2/t")
 
                 st.markdown("---")
-
-                # PPA Analysis
                 st.subheader("💡 PPA Strategy Recommendation")
-
                 result_no_ppa = engine.calculate(
                     prod_vol, eua_price, free_alloc,
                     lambda_avg=0.5, shock_multiplier=0.0
@@ -529,9 +479,8 @@ def main():
                     prod_vol, eua_price, free_alloc,
                     lambda_avg=0.2, shock_multiplier=-0.1
                 )
-
                 savings = result_no_ppa["risk_eur"] - result_ppa["risk_eur"]
-                consumption = prod_vol * 0.5  # MWh
+                consumption = prod_vol * 0.5
                 energy_cost_savings = (spot_price - ppa_price) * consumption
                 total_savings = savings + energy_cost_savings
                 recommendation = "✅ BUY PPA" if total_savings > 0 else "⚠️ WAIT"
@@ -553,15 +502,10 @@ def main():
                     st.warning(f"⚠️ Recommendation: **WAIT** – PPA would cost **{abs(total_savings):,.2f} EUR** more than spot")
 
                 st.markdown("---")
-
-                # Plots
                 st.subheader("📈 Simulation Charts")
-
-                # Create five plots (dodajemo CBAM breakdown chart)
                 fig, axes = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
                 fig.subplots_adjust(hspace=0.3)
 
-                # 1. Lambda
                 axes[0].plot(df["time"], df["lambda_avg"], label="avg lambda", color="blue", linewidth=2)
                 axes[0].plot(df["time"], df["lambda_max"], label="max lambda", color="red", linestyle="--", linewidth=1.5)
                 axes[0].axhline(y=trigger_threshold, color="gray", linestyle=":", label="trigger threshold", linewidth=1)
@@ -570,25 +514,21 @@ def main():
                 axes[0].grid(True, alpha=0.3)
                 axes[0].set_ylim(0, max(1.0, df["lambda_max"].max() * 1.1))
 
-                # 2. Carbon
                 axes[1].plot(df["time"], df["total_carbon"], label="Total Carbon (tCO2e)", color="green", linewidth=2)
                 axes[1].set_ylabel("tCO2e", fontsize=11)
                 axes[1].legend(loc="upper right")
                 axes[1].grid(True, alpha=0.3)
 
-                # 3. Risk
                 axes[2].plot(df["time"], df["risk_eur"], label="Financial Risk (EUR)", color="magenta", linewidth=2)
                 axes[2].set_ylabel("EUR", fontsize=11)
                 axes[2].legend(loc="upper right")
                 axes[2].grid(True, alpha=0.3)
 
-                # 4. CBAM Liability
                 axes[3].plot(df["time"], df["cbam_liability"], label="CBAM Liability (EUR)", color="orange", linewidth=2)
                 axes[3].set_ylabel("EUR", fontsize=11)
                 axes[3].legend(loc="upper right")
                 axes[3].grid(True, alpha=0.3)
 
-                # 5. Embedded emissions breakdown
                 axes[4].plot(df["time"], df["internal_emissions_per_tonne"], label="Internal", color="blue", linewidth=2)
                 axes[4].plot(df["time"], df["imported_emissions_per_tonne"], label="Imported (precursor)", color="red", linestyle="--", linewidth=2)
                 axes[4].plot(df["time"], df["embedded_emissions_per_tonne"], label="Total embedded", color="green", linewidth=2)
@@ -603,8 +543,6 @@ def main():
                 plt.close(fig)
 
                 st.markdown("---")
-
-                # Knowledge Graph
                 st.subheader("🧠 Knowledge Graph – Semantic Linkage")
                 fig2, ax2 = plt.subplots(figsize=(10, 6))
                 G = nx.DiGraph()
@@ -631,8 +569,6 @@ def main():
                 plt.close(fig2)
 
                 st.markdown("---")
-
-                # Download
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download Simulation Data (CSV)",
@@ -641,7 +577,6 @@ def main():
                     mime="text/csv",
                     use_container_width=True
                 )
-
                 st.success("✅ Simulation completed successfully!")
 
             except Exception as e:
