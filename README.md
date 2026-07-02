@@ -151,6 +151,24 @@ carbon-shield-cbam/
 ![Carbon Shield Dashboard](Dashboard5.jpg)
 ![Carbon Shield Dashboard](Dashboard6.jpg)
 
+## 🔮 Roadmap
+
+| Status | Feature |
+|--------|---------|
+| ✅ | Live EUA price feed (yfinance) |
+| ✅ | Stochastic kernel with cascade alerts |
+| ✅ | EU ETS risk calculator |
+| ✅ | CBAM liability estimator |
+| ✅ | PPA strategy optimizer |
+| ✅ | Scenario analysis (3 scenarios) |
+| ✅ | Knowledge graph visualization |
+| ✅ | CSV export |
+| ✅ | Streamlit interactive dashboard |
+| 🔄 | MLE calibration (in progress) |
+| 🔜 | Historical data upload (CSV) |
+| 🔜 | Email alerts (EUA price thresholds) |
+| 🔜 | Docker containerization |
+| 🔜 | REST API wrapper (FastAPI) |
 
 ##🤝 **Contributing**
 
