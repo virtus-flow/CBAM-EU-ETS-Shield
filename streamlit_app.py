@@ -1,6 +1,6 @@
 # ==============================================================================
 # CARBON SHIELD – EU ETS + CBAM Risk Management Tool
-# Streamlit Application – Version 2.7.2 (PPA zero-risk handling)
+# Streamlit Application – Version 2.8 (3 Scenario Analysis)
 # ==============================================================================
 
 import streamlit as st
@@ -24,7 +24,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# 0. CONFIGURATION (nepromenjeno)
+# 0. CONFIGURATION
 # ==============================================================================
 CONFIG = {
     "kernel": {
@@ -232,7 +232,122 @@ class CBAMCalculator:
         }
 
 # ==============================================================================
-# 2. STREAMLIT APP
+# 2. SCENARIO FUNCTIONS
+# ==============================================================================
+
+def run_single_scenario(engine, cbam, kernel, prod_vol, eua_price, free_alloc,
+                        water_base, water_vol, shock_mult, n_steps,
+                        cbam_benchmark, product_category,
+                        imported_intensity, imported_usage,
+                        trigger_threshold):
+    """Run a single simulation scenario and return results."""
+    kernel.trigger_threshold = trigger_threshold
+    records = []
+    for t in range(n_steps):
+        base_signal = water_base / 1000.0
+        noise = np.random.normal(0, water_vol, size=(kernel.J, kernel.K))
+        X_t = np.maximum(base_signal + noise, 0.0)
+
+        lambda_vec, triggered = kernel.process_time_step(X_t)
+        lambda_avg = np.mean(lambda_vec)
+        shock = shock_mult + (0.10 if np.any(triggered) else 0.0)
+
+        result = engine.calculate(
+            prod_vol, eua_price, free_alloc,
+            lambda_avg=lambda_avg,
+            shock_multiplier=shock
+        )
+
+        cbam_res = cbam.calculate(
+            result["total_carbon"],
+            prod_vol,
+            eua_price,
+            benchmark=cbam_benchmark,
+            product_category=product_category,
+            imported_intensity=imported_intensity,
+            imported_usage=imported_usage
+        )
+
+        records.append({
+            "time": t,
+            "lambda_avg": lambda_avg,
+            "lambda_max": np.max(lambda_vec),
+            "triggered_any": np.any(triggered),
+            **result,
+            "internal_emissions_per_tonne": cbam_res["internal_emissions_per_tonne"],
+            "imported_emissions_per_tonne": cbam_res["imported_emissions_per_tonne"],
+            "embedded_emissions_per_tonne": cbam_res["embedded_emissions_per_tonne"],
+            "cbam_liability": cbam_res["cbam_liability"],
+            "excess_emissions": cbam_res["excess_emissions"],
+            "benchmark_used": cbam_res["benchmark_used"]
+        })
+    return pd.DataFrame(records)
+
+def run_scenario_analysis(prod_vol, eua_price, free_alloc, n_steps,
+                          cbam_benchmark, product_category,
+                          imported_intensity, imported_usage,
+                          trigger_threshold):
+    """Run 3 scenarios: Optimistic, Base, Pessimistic."""
+    np.random.seed(42)
+    
+    engine = ETSComplianceEngine(CONFIG)
+    cbam = CBAMCalculator(CONFIG)
+    kernel = AramisAlfaPulseKernel(CONFIG)
+
+    scenarios = {
+        "Optimistic": {
+            "water_base": 2000,
+            "water_vol": 200,
+            "shock_mult": 0.0
+        },
+        "Base": {
+            "water_base": CONFIG["simulation"]["default_water_base"],
+            "water_vol": CONFIG["simulation"]["default_water_vol"],
+            "shock_mult": 0.1
+        },
+        "Pessimistic": {
+            "water_base": 5000,
+            "water_vol": 800,
+            "shock_mult": 0.3
+        }
+    }
+
+    results = {}
+    for name, params in scenarios.items():
+        df = run_single_scenario(
+            engine, cbam, kernel,
+            prod_vol, eua_price, free_alloc,
+            params["water_base"],
+            params["water_vol"],
+            params["shock_mult"],
+            n_steps,
+            cbam_benchmark, product_category,
+            imported_intensity, imported_usage,
+            trigger_threshold
+        )
+        results[name] = df
+
+    return results
+
+def get_scenario_summary(results):
+    """Extract key metrics from scenario results."""
+    summary = {}
+    for name, df in results.items():
+        last = df.iloc[-1]
+        summary[name] = {
+            "total_carbon": last["total_carbon"],
+            "risk_eur": last["risk_eur"],
+            "cbam_liability": last["cbam_liability"],
+            "lambda_avg": last["lambda_avg"],
+            "cascade": last["triggered_any"],
+            "embedded": last["embedded_emissions_per_tonne"],
+            "internal": last["internal_emissions_per_tonne"],
+            "imported": last["imported_emissions_per_tonne"]
+        }
+    return summary
+
+# ==============================================================================
+# 3. STREAMLIT APP
 # ==============================================================================
 
 def main():
@@ -281,29 +396,6 @@ def main():
             value=CONFIG["kernel"]["trigger_threshold"],
             step=0.05,
             help="Lambda threshold for cascade detection (lower = more sensitive)"
-        )
-
-        st.subheader("🌊 Water Emissions")
-        water_base = st.slider(
-            "Water Emission Base (m³)",
-            min_value=500,
-            max_value=15000,
-            value=CONFIG["simulation"]["default_water_base"],
-            step=500
-        )
-        water_vol = st.slider(
-            "Water Volatility",
-            min_value=100,
-            max_value=1500,
-            value=CONFIG["simulation"]["default_water_vol"],
-            step=100
-        )
-        shock_mult = st.slider(
-            "Shock Multiplier",
-            min_value=0.0,
-            max_value=0.5,
-            value=0.0,
-            step=0.05
         )
 
         st.markdown("---")
@@ -373,8 +465,17 @@ def main():
         )
 
         st.markdown("---")
-        run_button = st.button("🚀 Run Simulation", use_container_width=True, type="primary")
 
+        # Dva dugmeta: Run Simulation i Scenario Analysis
+        col1, col2 = st.columns(2)
+        with col1:
+            run_button = st.button("🚀 Run Simulation", use_container_width=True, type="primary")
+        with col2:
+            scenario_button = st.button("📊 3 Scenarios", use_container_width=True)
+
+    # ==============================================================
+    # SINGLE SIMULATION
+    # ==============================================================
     if run_button:
         with st.spinner("🧮 Running simulation..."):
             try:
@@ -384,47 +485,17 @@ def main():
                 cbam = CBAMCalculator(CONFIG)
                 kernel.trigger_threshold = trigger_threshold
 
-                records = []
-                for t in range(n_steps):
-                    base_signal = water_base / 1000.0
-                    noise = np.random.normal(0, water_vol, size=(kernel.J, kernel.K))
-                    X_t = np.maximum(base_signal + noise, 0.0)
+                df = run_single_scenario(
+                    engine, cbam, kernel,
+                    prod_vol, eua_price, free_alloc,
+                    CONFIG["simulation"]["default_water_base"],
+                    CONFIG["simulation"]["default_water_vol"],
+                    0.1, n_steps,
+                    cbam_benchmark, product_category,
+                    imported_intensity, imported_usage,
+                    trigger_threshold
+                )
 
-                    lambda_vec, triggered = kernel.process_time_step(X_t)
-                    lambda_avg = np.mean(lambda_vec)
-                    shock = shock_mult + (0.10 if np.any(triggered) else 0.0)
-
-                    result = engine.calculate(
-                        prod_vol, eua_price, free_alloc,
-                        lambda_avg=lambda_avg,
-                        shock_multiplier=shock
-                    )
-
-                    cbam_res = cbam.calculate(
-                        result["total_carbon"],
-                        prod_vol,
-                        eua_price,
-                        benchmark=cbam_benchmark,
-                        product_category=product_category,
-                        imported_intensity=imported_intensity,
-                        imported_usage=imported_usage
-                    )
-
-                    records.append({
-                        "time": t,
-                        "lambda_avg": lambda_avg,
-                        "lambda_max": np.max(lambda_vec),
-                        "triggered_any": np.any(triggered),
-                        **result,
-                        "internal_emissions_per_tonne": cbam_res["internal_emissions_per_tonne"],
-                        "imported_emissions_per_tonne": cbam_res["imported_emissions_per_tonne"],
-                        "embedded_emissions_per_tonne": cbam_res["embedded_emissions_per_tonne"],
-                        "cbam_liability": cbam_res["cbam_liability"],
-                        "excess_emissions": cbam_res["excess_emissions"],
-                        "benchmark_used": cbam_res["benchmark_used"]
-                    })
-
-                df = pd.DataFrame(records)
                 last = df.iloc[-1]
 
                 st.markdown("## 📊 Simulation Results")
@@ -450,9 +521,7 @@ def main():
                 with col3:
                     st.metric("Total embedded", f"{last['embedded_emissions_per_tonne']:.3f} tCO2/t")
 
-                # ==============================================================
-                # PPA ANALYSIS (sa upozorenjem za nulti rizik)
-                # ==============================================================
+                # PPA Analysis
                 st.markdown("---")
                 st.subheader("💡 PPA Strategy Recommendation")
 
@@ -466,23 +535,13 @@ def main():
                 )
 
                 savings = result_no_ppa["risk_eur"] - result_ppa["risk_eur"]
-                consumption = prod_vol * 0.5  # MWh
+                consumption = prod_vol * 0.5
                 energy_cost_savings = (spot_price - ppa_price) * consumption
                 total_savings = savings + energy_cost_savings
                 recommendation = "✅ BUY PPA" if total_savings > 0 else "⚠️ WAIT"
 
-                # Ako je ETS rizik 0, prikaži upozorenje
                 if result_no_ppa["risk_eur"] == 0 and result_ppa["risk_eur"] == 0:
-                    st.warning(
-                        "⚠️ **ETS risk is zero for this production volume** because Scope 1 emissions are "
-                        "below free allowances. PPA strategy recommendation is based on risk reduction; "
-                        "since risk is already zero, PPA provides **no additional ETS benefit**.\n\n"
-                        "💡 **What you can do:**\n"
-                        "• Reduce **Free allowances** to match your actual production level\n"
-                        "• Increase **Production volume** to see the effect of ETS risk\n"
-                        "• Focus on **Energy cost savings** (displayed below) – PPA may still be beneficial "
-                        "if spot price > PPA price."
-                    )
+                    st.warning("⚠️ ETS risk is zero. PPA provides no additional ETS benefit.")
 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -494,20 +553,15 @@ def main():
                 with col4:
                     st.metric("Total Savings", f"{total_savings:,.2f} EUR", delta=recommendation)
 
-                # Prikaži energetske uštede ako nisu nula
                 if energy_cost_savings != 0:
-                    st.caption(f"⚡ Energy cost savings: **{energy_cost_savings:,.2f} EUR** (based on {consumption:,.0f} MWh consumption)")
+                    st.caption(f"⚡ Energy cost savings: **{energy_cost_savings:,.2f} EUR**")
 
                 if total_savings > 0:
                     st.success(f"✅ Recommendation: **BUY PPA** – Total savings of **{total_savings:,.2f} EUR**")
-                    if consumption > 0:
-                        st.info(f"💡 Break-even PPA price: **{spot_price - (savings / consumption):.2f} EUR/MWh**")
                 else:
                     st.warning(f"⚠️ Recommendation: **WAIT** – PPA would cost **{abs(total_savings):,.2f} EUR** more than spot")
 
-                # ==============================================================
-                # PLOTOVI (nepromenjeno)
-                # ==============================================================
+                # Plots
                 st.markdown("---")
                 st.subheader("📈 Simulation Charts")
                 fig, axes = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
@@ -519,7 +573,6 @@ def main():
                 axes[0].set_ylabel("Lambda", fontsize=11)
                 axes[0].legend(loc="upper right")
                 axes[0].grid(True, alpha=0.3)
-                axes[0].set_ylim(0, max(1.0, df["lambda_max"].max() * 1.1))
 
                 axes[1].plot(df["time"], df["total_carbon"], label="Total Carbon (tCO2e)", color="green", linewidth=2)
                 axes[1].set_ylabel("tCO2e", fontsize=11)
@@ -549,6 +602,7 @@ def main():
                 st.pyplot(fig)
                 plt.close(fig)
 
+                # Knowledge Graph
                 st.markdown("---")
                 st.subheader("🧠 Knowledge Graph – Semantic Linkage")
                 fig2, ax2 = plt.subplots(figsize=(10, 6))
@@ -571,10 +625,11 @@ def main():
                 nx.draw(G, pos, with_labels=True, node_color="lightblue",
                         node_size=3000, font_size=10, arrowsize=20,
                         edge_color="gray", ax=ax2, font_weight="bold")
-                ax2.set_title("Knowledge Graph: Carbon Shield (CBAM Full Compliance)", fontsize=14)
+                ax2.set_title("Knowledge Graph: Carbon Shield", fontsize=14)
                 st.pyplot(fig2)
                 plt.close(fig2)
 
+                # Download
                 st.markdown("---")
                 csv = df.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -588,6 +643,161 @@ def main():
 
             except Exception as e:
                 st.error(f"❌ Error during simulation: {str(e)}")
+                st.exception(e)
+
+    # ==============================================================
+    # SCENARIO ANALYSIS (3 SCENARIOS)
+    # ==============================================================
+    if scenario_button:
+        with st.spinner("🧮 Running 3 scenario analysis..."):
+            try:
+                results = run_scenario_analysis(
+                    prod_vol, eua_price, free_alloc, n_steps,
+                    cbam_benchmark, product_category,
+                    imported_intensity, imported_usage,
+                    trigger_threshold
+                )
+
+                summary = get_scenario_summary(results)
+
+                st.markdown("## 📊 3-Scenario Analysis")
+                st.markdown("*Optimistic, Base, and Pessimistic scenarios compared*")
+                st.markdown("---")
+
+                # Scenario Comparison Table
+                st.markdown("### 📋 Scenario Comparison Table")
+
+                scenario_data = []
+                for name, metrics in summary.items():
+                    scenario_data.append({
+                        "Scenario": name,
+                        "Carbon (tCO2e)": f"{metrics['total_carbon']:,.2f}",
+                        "ETS Risk (EUR)": f"{metrics['risk_eur']:,.2f}",
+                        "CBAM Liability (EUR)": f"{metrics['cbam_liability']:,.2f}",
+                        "Avg Lambda": f"{metrics['lambda_avg']:.3f}",
+                        "Cascade": "🔴 YES" if metrics['cascade'] else "🟢 NO",
+                        "Embedded (tCO2/t)": f"{metrics['embedded']:.3f}"
+                    })
+
+                df_scenario = pd.DataFrame(scenario_data)
+                st.dataframe(df_scenario, use_container_width=True, hide_index=True)
+
+                st.markdown("---")
+
+                # Risk Range (Min-Max)
+                st.markdown("### 📈 Risk Range & Confidence")
+
+                risk_values = [summary[s]['risk_eur'] for s in summary]
+                carbon_values = [summary[s]['total_carbon'] for s in summary]
+                cbam_values = [summary[s]['cbam_liability'] for s in summary]
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        "ETS Risk Range",
+                        f"€{min(risk_values):,.0f} – €{max(risk_values):,.0f}",
+                        delta=f"±{((max(risk_values)-min(risk_values))/2):,.0f} EUR",
+                        delta_color="off"
+                    )
+                with col2:
+                    st.metric(
+                        "Carbon Range",
+                        f"{min(carbon_values):,.0f} – {max(carbon_values):,.0f} tCO2e",
+                        delta=f"±{((max(carbon_values)-min(carbon_values))/2):,.0f} tCO2e",
+                        delta_color="off"
+                    )
+                with col3:
+                    st.metric(
+                        "CBAM Range",
+                        f"€{min(cbam_values):,.0f} – €{max(cbam_values):,.0f}",
+                        delta=f"±{((max(cbam_values)-min(cbam_values))/2):,.0f} EUR",
+                        delta_color="off"
+                    )
+
+                st.markdown("---")
+
+                # Scenario Bar Chart
+                st.markdown("### 📊 Visual Comparison")
+
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+                # Risk bar chart
+                scenarios_names = list(summary.keys())
+                risk_vals = [summary[s]['risk_eur'] for s in scenarios_names]
+                colors = ['#2ecc71', '#3498db', '#e74c3c']
+
+                bars = axes[0].bar(scenarios_names, risk_vals, color=colors)
+                axes[0].set_title('ETS Financial Risk', fontsize=12)
+                axes[0].set_ylabel('EUR')
+                axes[0].grid(True, alpha=0.3)
+
+                # Carbon bar chart
+                carbon_vals = [summary[s]['total_carbon'] for s in scenarios_names]
+                axes[1].bar(scenarios_names, carbon_vals, color=colors)
+                axes[1].set_title('Total Carbon Footprint', fontsize=12)
+                axes[1].set_ylabel('tCO2e')
+                axes[1].grid(True, alpha=0.3)
+
+                # CBAM bar chart
+                cbam_vals = [summary[s]['cbam_liability'] for s in scenarios_names]
+                axes[2].bar(scenarios_names, cbam_vals, color=colors)
+                axes[2].set_title('CBAM Liability', fontsize=12)
+                axes[2].set_ylabel('EUR')
+                axes[2].grid(True, alpha=0.3)
+
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+
+                st.markdown("---")
+
+                # Auto Recommendation
+                st.markdown("### 💡 Executive Recommendation")
+
+                base_risk = summary["Base"]["risk_eur"]
+                opt_risk = summary["Optimistic"]["risk_eur"]
+                pess_risk = summary["Pessimistic"]["risk_eur"]
+
+                if base_risk > 0:
+                    savings_vs_pess = pess_risk - base_risk
+                    if savings_vs_pess > 10000:
+                        recommendation = f"✅ **Strong opportunity**: Moving from Pessimistic to Base scenario saves **€{savings_vs_pess:,.0f}**. Focus on operational stability."
+                    elif savings_vs_pess > 5000:
+                        recommendation = f"🟡 **Moderate opportunity**: Moving from Pessimistic to Base scenario saves **€{savings_vs_pess:,.0f}**. Consider targeted interventions."
+                    else:
+                        recommendation = f"ℹ️ **Limited opportunity**: Base scenario risk is already close to Optimistic. Focus on maintaining current performance."
+                else:
+                    recommendation = "✅ **Excellent position**: Base scenario ETS risk is zero. Focus on CBAM optimization and PPA strategy."
+
+                st.info(recommendation)
+
+                st.markdown("---")
+
+                # Download all scenarios
+                st.markdown("### 📥 Export All Scenarios")
+
+                all_scenarios_df = pd.DataFrame({
+                    "Scenario": scenarios_names,
+                    "Risk (EUR)": risk_vals,
+                    "Carbon (tCO2e)": carbon_vals,
+                    "CBAM (EUR)": cbam_vals,
+                    "Lambda": [summary[s]['lambda_avg'] for s in scenarios_names],
+                    "Cascade": ["YES" if summary[s]['cascade'] else "NO" for s in scenarios_names]
+                })
+
+                csv_all = all_scenarios_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download 3-Scenario Results (CSV)",
+                    data=csv_all,
+                    file_name=f"scenario_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+                st.success("✅ 3-Scenario analysis completed successfully!")
+
+            except Exception as e:
+                st.error(f"❌ Error during scenario analysis: {str(e)}")
                 st.exception(e)
 
 if __name__ == "__main__":
