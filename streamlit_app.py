@@ -292,7 +292,7 @@ def main():
         prod_vol = st.number_input(
             "Production Volume (tonnes)",
             value=CONFIG["simulation"]["default_production"],
-            min_value=5000,
+            min_value=500,
             max_value=50000,
             step=500,
             help="Total production volume in tonnes"
