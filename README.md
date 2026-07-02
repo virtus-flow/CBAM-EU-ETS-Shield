@@ -106,7 +106,7 @@ carbon-shield-cbam/
 ├── streamlit_app.py
 ├── requirements.txt
 └── README.md
-
+```
 ## ⚙️ Configuration
 
    ```py
