@@ -201,6 +201,6 @@ Distributed under the MIT License. See LICENSE file for more information.
 - [UniCredit Group](https://www.unicreditgroup.eu/en.html) – for funding the program
 
 
-<div align="center"> <sub>Built with ❤️ for the green transition</sub> </div> ```
+<div align="center"> <sub>Built with ❤️ for the green transition</sub> </div>
 
 
