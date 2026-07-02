@@ -184,19 +184,22 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 Distributed under the MIT License. See LICENSE file for more information.
 
-## 📬 **Contact**
+## 📬 Contact
 
-Ognjen Raketić, M.Sc.
-LinkedIn: [Ognjen](linkedin.com/in/ognjen-raketic)
-Email: [ognjen.raketic](ognjen.raketic@gmail.com)
-GitHub: [Ognjen R.](github.com/virtus-flow)
+**Ognjen Raketić, M.Sc.**
 
+- LinkedIn: [Ognjen Raketić](https://linkedin.com/in/ognjen-raketic)
+- Email: [ognjen.raketic@gmail.com](mailto:ognjen.raketic@gmail.com)
+- GitHub: [virtus-flow](https://github.com/virtus-flow)
 
-## 🙏 **Acknowledgments**
+---
 
-* [Prof. Enrico Zio (Politecnico di Milano)][https://scholar.google.com/citations?hl=en&user=Fz_uKmYAAAAJ] – for supervising the research on stochastic reliability modeling
-* [POLIMI Graduate School of Management – Skills for Transition Bootcamp][https://www.gsom.polimi.it/en/course/skills-for-transition/]
-* [UniCredit Group – for funding the program][https://www.unicreditgroup.eu/en.html]
+## 🙏 Acknowledgments
+
+- [Prof. Enrico Zio (Politecnico di Milano)](https://scholar.google.com/citations?hl=en&user=Fz_uKmYAAAAJ) – for supervising the research on stochastic reliability modeling
+- [POLIMI Graduate School of Management – Skills for Transition Bootcamp](https://www.gsom.polimi.it/en/course/skills-for-transition/)
+- [UniCredit Group](https://www.unicreditgroup.eu/en.html) – for funding the program
+
 
 <div align="center"> <sub>Built with ❤️ for the green transition</sub> </div> ```
 
