@@ -187,9 +187,9 @@ Distributed under the MIT License. See LICENSE file for more information.
 ## 📬 **Contact**
 
 Ognjen Raketić, M.Sc.
-LinkedIn: [Ognjen][linkedin.com/in/ognjen-raketic]
-Email: [ognjen.raketic@gmail.com]
-GitHub: [github.com/virtus-flow]
+LinkedIn: [Ognjen](linkedin.com/in/ognjen-raketic)
+Email: [ognjen.raketic](ognjen.raketic@gmail.com)
+GitHub: [Ognjen R.](github.com/virtus-flow)
 
 
 ## 🙏 **Acknowledgments**
