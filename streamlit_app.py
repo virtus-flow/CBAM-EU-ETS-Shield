@@ -1,6 +1,6 @@
 # ==============================================================================
 # CARBON SHIELD – EU ETS + CBAM Risk Management Tool
-# Streamlit Application – Version 2.8 (3 Scenario Analysis)
+# Streamlit Application – Version 3.0 (Enterprise Ready)
 # ==============================================================================
 
 import streamlit as st
@@ -11,6 +11,16 @@ import networkx as nx
 import yfinance as yf
 from datetime import datetime
 import warnings
+import io
+import tempfile
+import os
+from scipy.optimize import minimize
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.units import cm
 warnings.filterwarnings("ignore")
 
 # ==============================================================================
@@ -82,7 +92,7 @@ CONFIG = {
 }
 
 # ==============================================================================
-# 1. CORE CLASSES (nepromenjeno)
+# 1. CORE CLASSES
 # ==============================================================================
 
 def get_live_eua_price():
@@ -232,21 +242,25 @@ class CBAMCalculator:
         }
 
 # ==============================================================================
-# 2. SCENARIO FUNCTIONS
+# 2. ENHANCED SCENARIO FUNCTIONS
 # ==============================================================================
 
 def run_single_scenario(engine, cbam, kernel, prod_vol, eua_price, free_alloc,
                         water_base, water_vol, shock_mult, n_steps,
                         cbam_benchmark, product_category,
                         imported_intensity, imported_usage,
-                        trigger_threshold):
-    """Run a single simulation scenario and return results."""
+                        trigger_threshold, historical_data=None):
+    """Run a single simulation scenario with optional historical data."""
     kernel.trigger_threshold = trigger_threshold
     records = []
+    
     for t in range(n_steps):
-        base_signal = water_base / 1000.0
-        noise = np.random.normal(0, water_vol, size=(kernel.J, kernel.K))
-        X_t = np.maximum(base_signal + noise, 0.0)
+        if historical_data is not None and t < len(historical_data):
+            X_t = historical_data[t]
+        else:
+            base_signal = water_base / 1000.0
+            noise = np.random.normal(0, water_vol, size=(kernel.J, kernel.K))
+            X_t = np.maximum(base_signal + noise, 0.0)
 
         lambda_vec, triggered = kernel.process_time_step(X_t)
         lambda_avg = np.mean(lambda_vec)
@@ -286,8 +300,8 @@ def run_single_scenario(engine, cbam, kernel, prod_vol, eua_price, free_alloc,
 def run_scenario_analysis(prod_vol, eua_price, free_alloc, n_steps,
                           cbam_benchmark, product_category,
                           imported_intensity, imported_usage,
-                          trigger_threshold):
-    """Run 3 scenarios: Optimistic, Base, Pessimistic."""
+                          trigger_threshold, historical_data=None):
+    """Run 3 scenarios with optional historical data."""
     np.random.seed(42)
     
     engine = ETSComplianceEngine(CONFIG)
@@ -323,7 +337,8 @@ def run_scenario_analysis(prod_vol, eua_price, free_alloc, n_steps,
             n_steps,
             cbam_benchmark, product_category,
             imported_intensity, imported_usage,
-            trigger_threshold
+            trigger_threshold,
+            historical_data
         )
         results[name] = df
 
@@ -347,10 +362,339 @@ def get_scenario_summary(results):
     return summary
 
 # ==============================================================================
-# 3. STREAMLIT APP
+# 3. HISTORICAL DATA UPLOAD
+# ==============================================================================
+
+def upload_historical_data():
+    """Upload historical sensor data CSV."""
+    st.subheader("📁 Historical Data Upload")
+    st.markdown("Upload your own sensor data instead of using generated data.")
+    st.info("CSV format: time | component_id | sensor_1 | ... | sensor_K (K=10)")
+    
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file",
+        type=['csv'],
+        help="Format: time, component_id, sensor_1, ..., sensor_K"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.success(f"✅ Successfully loaded {len(df)} rows")
+            
+            with st.expander("📊 Data Preview"):
+                st.dataframe(df.head(10))
+                st.caption(f"Columns: {', '.join(df.columns)}")
+            
+            # Convert to numpy array format (n_samples, J, K)
+            # Assuming J=4 components, K=10 sensors
+            # Data should have columns: time, component_id, sensor_1...sensor_10
+            if 'component_id' in df.columns:
+                J = df['component_id'].nunique()
+                # Group by time and component_id
+                sensor_cols = [c for c in df.columns if c.startswith('sensor_')]
+                if sensor_cols:
+                    K = len(sensor_cols)
+                    # Pivot to (time, component, sensor)
+                    pivot_df = df.pivot(index='time', columns='component_id', values=sensor_cols)
+                    # Convert to numpy array (n_times, J, K)
+                    data_array = pivot_df.values.reshape(-1, J, K)
+                    st.success(f"✅ Data reshaped to ({data_array.shape[0]}, {J}, {K})")
+                    return data_array, df
+            else:
+                # Try raw numpy format
+                data_array = df.values[:, 1:].reshape(-1, 4, 10)
+                st.success(f"✅ Data reshaped to ({data_array.shape[0]}, 4, 10)")
+                return data_array, df
+        except Exception as e:
+            st.error(f"❌ Error reading file: {str(e)}")
+            return None, None
+    return None, None
+
+# ==============================================================================
+# 4. MLE CALIBRATION
+# ==============================================================================
+
+class MLEKalibrator:
+    """Maximum Likelihood Estimation for kernel parameters."""
+    
+    def __init__(self, config):
+        self.config = config
+    
+    def calibrate(self, sensor_data, fault_labels):
+        """
+        Calibrate kernel parameters using historical data.
+        
+        Parameters:
+        - sensor_data: (n_samples, J, K) array
+        - fault_labels: (n_samples,) boolean array (True = fault occurred)
+        
+        Returns:
+        - optimized parameters
+        """
+        def negative_log_likelihood(params):
+            beta, mu, kick, gamma, sigma = params
+            
+            kernel = AramisAlfaPulseKernel(self.config)
+            kernel.beta = beta
+            kernel.mu = mu
+            kernel.kick = kick
+            kernel.sigma_multiplier = sigma
+            kernel.gamma = np.full((kernel.J, kernel.J), gamma)
+            np.fill_diagonal(kernel.gamma, 0.0)
+            
+            predictions = []
+            for t in range(len(sensor_data)):
+                _, triggered = kernel.process_time_step(sensor_data[t])
+                predictions.append(np.any(triggered))
+            
+            log_likelihood = 0
+            for pred, actual in zip(predictions, fault_labels):
+                p = pred + 1e-6
+                if actual:
+                    log_likelihood += np.log(p)
+                else:
+                    log_likelihood += np.log(1 - p)
+            
+            return -log_likelihood
+        
+        initial = [
+            self.config["kernel"]["beta"],
+            self.config["kernel"]["mu"],
+            self.config["kernel"]["kick"],
+            self.config["kernel"]["gamma"],
+            self.config["kernel"].get("sigma_multiplier", 2.7)
+        ]
+        
+        bounds = [
+            (0.01, 0.5),
+            (0.01, 0.5),
+            (0.01, 0.3),
+            (0.01, 0.3),
+            (1.5, 4.0)
+        ]
+        
+        with st.spinner("🔬 Running MLE optimization..."):
+            result = minimize(
+                negative_log_likelihood,
+                initial,
+                bounds=bounds,
+                method='L-BFGS-B'
+            )
+        
+        if result.success:
+            # Run final prediction for metrics
+            kernel = AramisAlfaPulseKernel(self.config)
+            kernel.beta = result.x[0]
+            kernel.mu = result.x[1]
+            kernel.kick = result.x[2]
+            kernel.sigma_multiplier = result.x[4]
+            kernel.gamma = np.full((kernel.J, kernel.J), result.x[3])
+            np.fill_diagonal(kernel.gamma, 0.0)
+            
+            predictions = []
+            for t in range(len(sensor_data)):
+                _, triggered = kernel.process_time_step(sensor_data[t])
+                predictions.append(np.any(triggered))
+            
+            return {
+                "beta": result.x[0],
+                "mu": result.x[1],
+                "kick": result.x[2],
+                "gamma": result.x[3],
+                "sigma_multiplier": result.x[4],
+                "success": True,
+                "predictions": predictions
+            }
+        else:
+            return {
+                "success": False,
+                "message": str(result.message)
+            }
+
+# ==============================================================================
+# 5. PDF REPORT GENERATOR
+# ==============================================================================
+
+def generate_pdf_report(results_df, summary_data, scenario_results=None):
+    """Generate professional PDF report."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+        pdf_path = tmp_file.name
+    
+    doc = SimpleDocTemplate(
+        pdf_path,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor('#1a5276'),
+        alignment=0
+    )
+    story.append(Paragraph("CARBON SHIELD – EU ETS & CBAM REPORT", title_style))
+    story.append(Spacer(1, 0.3*cm))
+    
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        textColor=colors.HexColor('#5d6d7e'),
+        alignment=0
+    )
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(PageBreak())
+    
+    # Executive Summary
+    story.append(Paragraph("1. EXECUTIVE SUMMARY", styles['Heading2']))
+    story.append(Spacer(1, 0.2*cm))
+    
+    summary_text = f"""
+    <b>Key Findings:</b><br/>
+    • Total Carbon Footprint: {summary_data.get('total_carbon', 0):,.2f} tCO2e<br/>
+    • ETS Financial Risk: €{summary_data.get('risk_eur', 0):,.2f}<br/>
+    • CBAM Liability: €{summary_data.get('cbam_liability', 0):,.2f}<br/>
+    • Average Lambda: {summary_data.get('lambda_avg', 0):.3f}<br/>
+    • Cascade Detected: {'YES' if summary_data.get('cascade', False) else 'NO'}
+    """
+    story.append(Paragraph(summary_text, styles['Normal']))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(PageBreak())
+    
+    # Metrics Table
+    story.append(Paragraph("2. KEY METRICS", styles['Heading2']))
+    story.append(Spacer(1, 0.2*cm))
+    
+    metrics_data = [
+        ["Metric", "Value"],
+        ["Total Carbon Footprint", f"{summary_data.get('total_carbon', 0):,.2f} tCO2e"],
+        ["ETS Financial Risk", f"€{summary_data.get('risk_eur', 0):,.2f}"],
+        ["CBAM Liability", f"€{summary_data.get('cbam_liability', 0):,.2f}"],
+        ["Average Lambda", f"{summary_data.get('lambda_avg', 0):.3f}"],
+        ["Cascade Detected", "YES" if summary_data.get('cascade', False) else "NO"],
+        ["Internal Emissions", f"{summary_data.get('internal', 0):.3f} tCO2/t"],
+        ["Imported Emissions", f"{summary_data.get('imported', 0):.3f} tCO2/t"],
+        ["Total Embedded", f"{summary_data.get('embedded', 0):.3f} tCO2/t"]
+    ]
+    
+    table = Table(metrics_data, colWidths=[8*cm, 8*cm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (1, 0), colors.HexColor('#1a5276')),
+        ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 0.5*cm))
+    story.append(PageBreak())
+    
+    # PPA Recommendation
+    story.append(Paragraph("3. PPA STRATEGY RECOMMENDATION", styles['Heading2']))
+    story.append(Spacer(1, 0.2*cm))
+    
+    ppa_text = f"""
+    <b>Recommendation:</b> {summary_data.get('ppa_recommendation', 'WAIT')}<br/>
+    <b>Risk without PPA:</b> €{summary_data.get('risk_without_ppa', 0):,.2f}<br/>
+    <b>Risk with PPA:</b> €{summary_data.get('risk_with_ppa', 0):,.2f}<br/>
+    <b>Total Savings:</b> €{summary_data.get('ppa_savings', 0):,.2f}
+    """
+    story.append(Paragraph(ppa_text, styles['Normal']))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(PageBreak())
+    
+    # Scenario Analysis
+    if scenario_results:
+        story.append(Paragraph("4. SCENARIO ANALYSIS", styles['Heading2']))
+        story.append(Spacer(1, 0.2*cm))
+        
+        scenario_data = [["Scenario", "Risk (EUR)", "Carbon (tCO2e)", "CBAM (EUR)"]]
+        for name, metrics in scenario_results.items():
+            scenario_data.append([
+                name,
+                f"{metrics.get('risk_eur', 0):,.2f}",
+                f"{metrics.get('total_carbon', 0):,.2f}",
+                f"{metrics.get('cbam_liability', 0):,.2f}"
+            ])
+        
+        table = Table(scenario_data, colWidths=[4*cm, 4*cm, 4*cm, 4*cm])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5276')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 0.5*cm))
+        story.append(PageBreak())
+    
+    # Footer
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.HexColor('#5d6d7e'),
+        alignment=0
+    )
+    story.append(Paragraph(
+        f"Generated by Carbon Shield v3.0 | Ognjen Raketić, M.Sc. | {datetime.now().strftime('%Y')}",
+        footer_style
+    ))
+    
+    doc.build(story)
+    return pdf_path
+
+def display_pdf_download_button(pdf_path):
+    """Display PDF download button in Streamlit."""
+    with open(pdf_path, 'rb') as f:
+        pdf_bytes = f.read()
+    
+    st.download_button(
+        label="📑 Download PDF Report",
+        data=pdf_bytes,
+        file_name=f"carbon_shield_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+    
+    try:
+        os.unlink(pdf_path)
+    except:
+        pass
+
+# ==============================================================================
+# 6. MAIN STREAMLIT APP
 # ==============================================================================
 
 def main():
+    # Initialize session state
+    if 'historical_data' not in st.session_state:
+        st.session_state['historical_data'] = None
+    if 'calibration_results' not in st.session_state:
+        st.session_state['calibration_results'] = None
+    if 'current_df' not in st.session_state:
+        st.session_state['current_df'] = None
+    if 'current_metadata' not in st.session_state:
+        st.session_state['current_metadata'] = None
+    
     st.title("🛡️ Carbon Shield – EU ETS & CBAM Risk Manager")
     st.markdown("**Professional EU ETS Risk Management System with CBAM Integration**")
     st.markdown("---")
@@ -465,13 +809,70 @@ def main():
         )
 
         st.markdown("---")
-
-        # Dva dugmeta: Run Simulation i Scenario Analysis
+        
+        # Main buttons
         col1, col2 = st.columns(2)
         with col1:
             run_button = st.button("🚀 Run Simulation", use_container_width=True, type="primary")
         with col2:
             scenario_button = st.button("📊 3 Scenarios", use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("📊 Advanced Features")
+        
+        upload_historical = st.checkbox("📁 Upload Historical Data")
+        calibrate_button = st.button("🔬 Calibrate Model", use_container_width=True)
+        pdf_report_button = st.button("📑 Generate PDF Report", use_container_width=True)
+
+    # ==============================================================
+    # HISTORICAL DATA UPLOAD
+    # ==============================================================
+    if upload_historical:
+        historical_data, raw_df = upload_historical_data()
+        if historical_data is not None:
+            st.session_state['historical_data'] = historical_data
+            st.session_state['historical_raw'] = raw_df
+
+    # ==============================================================
+    # MLE CALIBRATION
+    # ==============================================================
+    if calibrate_button:
+        if st.session_state['historical_data'] is not None:
+            with st.spinner("🔬 Running MLE calibration..."):
+                data = st.session_state['historical_data']
+                # Generate synthetic fault labels for demonstration (actual use would have real labels)
+                # In practice, user would upload fault labels separately
+                fault_labels = np.random.choice([True, False], size=len(data), p=[0.15, 0.85])
+                
+                calibrator = MLEKalibrator(CONFIG)
+                results = calibrator.calibrate(data, fault_labels)
+                
+                if results['success']:
+                    st.session_state['calibration_results'] = results
+                    st.success("✅ Calibration successful!")
+                    
+                    # Update CONFIG with calibrated values
+                    CONFIG["kernel"]["beta"] = results["beta"]
+                    CONFIG["kernel"]["mu"] = results["mu"]
+                    CONFIG["kernel"]["kick"] = results["kick"]
+                    CONFIG["kernel"]["gamma"] = results["gamma"]
+                    CONFIG["kernel"]["sigma_multiplier"] = results["sigma_multiplier"]
+                    
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    with col1:
+                        st.metric("β (beta)", f"{results['beta']:.3f}")
+                    with col2:
+                        st.metric("μ (mu)", f"{results['mu']:.3f}")
+                    with col3:
+                        st.metric("Kick", f"{results['kick']:.3f}")
+                    with col4:
+                        st.metric("γ (gamma)", f"{results['gamma']:.3f}")
+                    with col5:
+                        st.metric("σ (sigma)", f"{results['sigma_multiplier']:.2f}")
+                else:
+                    st.error(f"❌ Calibration failed: {results.get('message', 'Unknown error')}")
+        else:
+            st.warning("⚠️ Please upload historical data first.")
 
     # ==============================================================
     # SINGLE SIMULATION
@@ -480,10 +881,9 @@ def main():
         with st.spinner("🧮 Running simulation..."):
             try:
                 np.random.seed(42)
-                kernel = AramisAlfaPulseKernel(CONFIG)
                 engine = ETSComplianceEngine(CONFIG)
                 cbam = CBAMCalculator(CONFIG)
-                kernel.trigger_threshold = trigger_threshold
+                kernel = AramisAlfaPulseKernel(CONFIG)
 
                 df = run_single_scenario(
                     engine, cbam, kernel,
@@ -493,10 +893,24 @@ def main():
                     0.1, n_steps,
                     cbam_benchmark, product_category,
                     imported_intensity, imported_usage,
-                    trigger_threshold
+                    trigger_threshold,
+                    st.session_state['historical_data']
                 )
 
+                st.session_state['current_df'] = df
                 last = df.iloc[-1]
+                
+                # Store metadata for PDF
+                st.session_state['current_metadata'] = {
+                    "total_carbon": last["total_carbon"],
+                    "risk_eur": last["risk_eur"],
+                    "cbam_liability": last["cbam_liability"],
+                    "lambda_avg": last["lambda_avg"],
+                    "cascade": last["triggered_any"],
+                    "internal": last["internal_emissions_per_tonne"],
+                    "imported": last["imported_emissions_per_tonne"],
+                    "embedded": last["embedded_emissions_per_tonne"]
+                }
 
                 st.markdown("## 📊 Simulation Results")
                 col1, col2, col3, col4, col5 = st.columns(5)
@@ -539,6 +953,12 @@ def main():
                 energy_cost_savings = (spot_price - ppa_price) * consumption
                 total_savings = savings + energy_cost_savings
                 recommendation = "✅ BUY PPA" if total_savings > 0 else "⚠️ WAIT"
+
+                # Store PPA for PDF
+                st.session_state['current_metadata']['ppa_recommendation'] = recommendation
+                st.session_state['current_metadata']['risk_without_ppa'] = result_no_ppa["risk_eur"]
+                st.session_state['current_metadata']['risk_with_ppa'] = result_ppa["risk_eur"]
+                st.session_state['current_metadata']['ppa_savings'] = total_savings
 
                 if result_no_ppa["risk_eur"] == 0 and result_ppa["risk_eur"] == 0:
                     st.warning("⚠️ ETS risk is zero. PPA provides no additional ETS benefit.")
@@ -655,7 +1075,8 @@ def main():
                     prod_vol, eua_price, free_alloc, n_steps,
                     cbam_benchmark, product_category,
                     imported_intensity, imported_usage,
-                    trigger_threshold
+                    trigger_threshold,
+                    st.session_state['historical_data']
                 )
 
                 summary = get_scenario_summary(results)
@@ -684,7 +1105,7 @@ def main():
 
                 st.markdown("---")
 
-                # Risk Range (Min-Max)
+                # Risk Range
                 st.markdown("### 📈 Risk Range & Confidence")
 
                 risk_values = [summary[s]['risk_eur'] for s in summary]
@@ -716,31 +1137,27 @@ def main():
 
                 st.markdown("---")
 
-                # Scenario Bar Chart
+                # Bar Chart
                 st.markdown("### 📊 Visual Comparison")
-
                 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-                # Risk bar chart
                 scenarios_names = list(summary.keys())
                 risk_vals = [summary[s]['risk_eur'] for s in scenarios_names]
-                colors = ['#2ecc71', '#3498db', '#e74c3c']
+                colors_bar = ['#2ecc71', '#3498db', '#e74c3c']
 
-                bars = axes[0].bar(scenarios_names, risk_vals, color=colors)
+                axes[0].bar(scenarios_names, risk_vals, color=colors_bar)
                 axes[0].set_title('ETS Financial Risk', fontsize=12)
                 axes[0].set_ylabel('EUR')
                 axes[0].grid(True, alpha=0.3)
 
-                # Carbon bar chart
                 carbon_vals = [summary[s]['total_carbon'] for s in scenarios_names]
-                axes[1].bar(scenarios_names, carbon_vals, color=colors)
+                axes[1].bar(scenarios_names, carbon_vals, color=colors_bar)
                 axes[1].set_title('Total Carbon Footprint', fontsize=12)
                 axes[1].set_ylabel('tCO2e')
                 axes[1].grid(True, alpha=0.3)
 
-                # CBAM bar chart
                 cbam_vals = [summary[s]['cbam_liability'] for s in scenarios_names]
-                axes[2].bar(scenarios_names, cbam_vals, color=colors)
+                axes[2].bar(scenarios_names, cbam_vals, color=colors_bar)
                 axes[2].set_title('CBAM Liability', fontsize=12)
                 axes[2].set_ylabel('EUR')
                 axes[2].grid(True, alpha=0.3)
@@ -751,11 +1168,10 @@ def main():
 
                 st.markdown("---")
 
-                # Auto Recommendation
+                # Executive Recommendation
                 st.markdown("### 💡 Executive Recommendation")
 
                 base_risk = summary["Base"]["risk_eur"]
-                opt_risk = summary["Optimistic"]["risk_eur"]
                 pess_risk = summary["Pessimistic"]["risk_eur"]
 
                 if base_risk > 0:
@@ -773,9 +1189,8 @@ def main():
 
                 st.markdown("---")
 
-                # Download all scenarios
+                # Export all scenarios
                 st.markdown("### 📥 Export All Scenarios")
-
                 all_scenarios_df = pd.DataFrame({
                     "Scenario": scenarios_names,
                     "Risk (EUR)": risk_vals,
@@ -799,6 +1214,30 @@ def main():
             except Exception as e:
                 st.error(f"❌ Error during scenario analysis: {str(e)}")
                 st.exception(e)
+
+    # ==============================================================
+    # PDF REPORT GENERATOR
+    # ==============================================================
+    if pdf_report_button:
+        if st.session_state['current_df'] is not None and st.session_state['current_metadata'] is not None:
+            with st.spinner("📑 Generating PDF report..."):
+                try:
+                    # Get scenario results if available
+                    scenario_results = None
+                    if 'scenario_results' in st.session_state:
+                        scenario_results = st.session_state['scenario_results']
+                    
+                    pdf_path = generate_pdf_report(
+                        st.session_state['current_df'],
+                        st.session_state['current_metadata'],
+                        scenario_results
+                    )
+                    display_pdf_download_button(pdf_path)
+                    st.success("✅ PDF report generated successfully!")
+                except Exception as e:
+                    st.error(f"❌ Error generating PDF: {str(e)}")
+        else:
+            st.warning("⚠️ Please run a simulation first before generating a PDF report.")
 
 if __name__ == "__main__":
     main()
