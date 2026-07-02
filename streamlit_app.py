@@ -1,6 +1,6 @@
 # ==============================================================================
 # CARBON SHIELD – EU ETS + CBAM Risk Management Tool
-# Streamlit Application – Version 2.7.1 (Production range extended)
+# Streamlit Application – Version 2.7.2 (PPA zero-risk handling)
 # ==============================================================================
 
 import streamlit as st
@@ -24,7 +24,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# 0. CONFIGURATION
+# 0. CONFIGURATION (nepromenjeno)
 # ==============================================================================
 CONFIG = {
     "kernel": {
@@ -64,30 +64,12 @@ CONFIG = {
         },
         "default_benchmark": 1.328,
         "imported_materials": {
-            "Steel": {
-                "emission_intensity": 1.85,
-                "usage_per_tonne": 0.8
-            },
-            "Cement": {
-                "emission_intensity": 0.75,
-                "usage_per_tonne": 0.9
-            },
-            "Aluminium": {
-                "emission_intensity": 8.0,
-                "usage_per_tonne": 1.0
-            },
-            "Fertilisers": {
-                "emission_intensity": 1.2,
-                "usage_per_tonne": 0.6
-            },
-            "Electricity": {
-                "emission_intensity": 0.0,
-                "usage_per_tonne": 0.0
-            },
-            "Hydrogen": {
-                "emission_intensity": 0.0,
-                "usage_per_tonne": 0.0
-            }
+            "Steel": {"emission_intensity": 1.85, "usage_per_tonne": 0.8},
+            "Cement": {"emission_intensity": 0.75, "usage_per_tonne": 0.9},
+            "Aluminium": {"emission_intensity": 8.0, "usage_per_tonne": 1.0},
+            "Fertilisers": {"emission_intensity": 1.2, "usage_per_tonne": 0.6},
+            "Electricity": {"emission_intensity": 0.0, "usage_per_tonne": 0.0},
+            "Hydrogen": {"emission_intensity": 0.0, "usage_per_tonne": 0.0}
         }
     },
     "simulation": {
@@ -261,11 +243,10 @@ def main():
     with st.sidebar:
         st.header("⚙️ Parameters")
 
-        # Production & ETS
         prod_vol = st.number_input(
             "Production Volume (tonnes)",
             value=CONFIG["simulation"]["default_production"],
-            min_value=100,          # <-- PROMENA: sa 500 na 100
+            min_value=100,
             max_value=50000,
             step=500,
             help="Total production volume in tonnes"
@@ -285,7 +266,7 @@ def main():
         free_alloc = st.number_input(
             "Free Allowances (tCO2e)",
             value=CONFIG["simulation"]["default_free_allowances"],
-            min_value=1000,
+            min_value=0,
             max_value=10000,
             step=100,
             help="Free allocation under EU ETS"
@@ -469,8 +450,12 @@ def main():
                 with col3:
                     st.metric("Total embedded", f"{last['embedded_emissions_per_tonne']:.3f} tCO2/t")
 
+                # ==============================================================
+                # PPA ANALYSIS (sa upozorenjem za nulti rizik)
+                # ==============================================================
                 st.markdown("---")
                 st.subheader("💡 PPA Strategy Recommendation")
+
                 result_no_ppa = engine.calculate(
                     prod_vol, eua_price, free_alloc,
                     lambda_avg=0.5, shock_multiplier=0.0
@@ -479,11 +464,25 @@ def main():
                     prod_vol, eua_price, free_alloc,
                     lambda_avg=0.2, shock_multiplier=-0.1
                 )
+
                 savings = result_no_ppa["risk_eur"] - result_ppa["risk_eur"]
-                consumption = prod_vol * 0.5
+                consumption = prod_vol * 0.5  # MWh
                 energy_cost_savings = (spot_price - ppa_price) * consumption
                 total_savings = savings + energy_cost_savings
                 recommendation = "✅ BUY PPA" if total_savings > 0 else "⚠️ WAIT"
+
+                # Ako je ETS rizik 0, prikaži upozorenje
+                if result_no_ppa["risk_eur"] == 0 and result_ppa["risk_eur"] == 0:
+                    st.warning(
+                        "⚠️ **ETS risk is zero for this production volume** because Scope 1 emissions are "
+                        "below free allowances. PPA strategy recommendation is based on risk reduction; "
+                        "since risk is already zero, PPA provides **no additional ETS benefit**.\n\n"
+                        "💡 **What you can do:**\n"
+                        "• Reduce **Free allowances** to match your actual production level\n"
+                        "• Increase **Production volume** to see the effect of ETS risk\n"
+                        "• Focus on **Energy cost savings** (displayed below) – PPA may still be beneficial "
+                        "if spot price > PPA price."
+                    )
 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -495,12 +494,20 @@ def main():
                 with col4:
                     st.metric("Total Savings", f"{total_savings:,.2f} EUR", delta=recommendation)
 
+                # Prikaži energetske uštede ako nisu nula
+                if energy_cost_savings != 0:
+                    st.caption(f"⚡ Energy cost savings: **{energy_cost_savings:,.2f} EUR** (based on {consumption:,.0f} MWh consumption)")
+
                 if total_savings > 0:
                     st.success(f"✅ Recommendation: **BUY PPA** – Total savings of **{total_savings:,.2f} EUR**")
-                    st.info(f"💡 Break-even PPA price: **{spot_price - (savings / consumption):.2f} EUR/MWh**")
+                    if consumption > 0:
+                        st.info(f"💡 Break-even PPA price: **{spot_price - (savings / consumption):.2f} EUR/MWh**")
                 else:
                     st.warning(f"⚠️ Recommendation: **WAIT** – PPA would cost **{abs(total_savings):,.2f} EUR** more than spot")
 
+                # ==============================================================
+                # PLOTOVI (nepromenjeno)
+                # ==============================================================
                 st.markdown("---")
                 st.subheader("📈 Simulation Charts")
                 fig, axes = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
