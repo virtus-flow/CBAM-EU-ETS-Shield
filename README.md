@@ -97,6 +97,7 @@ Compares two scenarios:
 
 ## 📁 Repository Structure
 
+```bash
 carbon-shield-cbam/
 ├── screenshots/
 │   ├── dashboard.png
