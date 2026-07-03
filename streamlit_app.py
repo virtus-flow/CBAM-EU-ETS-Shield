@@ -526,17 +526,18 @@ def generate_methodology_text():
     return (
         "The analysis was conducted using the Carbon Shield risk management framework, "
         "which integrates three core components:\n\n"
-        "1. **Aramis Alfa-Pulse Stochastic Kernel** – A Hawkes-Merton process-based anomaly "
+        "1. <b>Aramis Alfa-Pulse Stochastic Kernel</b> – A Hawkes-Merton process-based anomaly "
         "detection engine that monitors sensor data in real time, identifying operational "
         "deviations before they escalate into failures. Validated on the Aramis Data Challenge "
         "benchmark (A = 0.1554 timeliness score) with sub-microsecond latency (1,499.9 ns).\n\n"
-        "2. **EU ETS Compliance Engine** – An input-output model that calculates Scope 1 and "
+        "2. <b>EU ETS Compliance Engine</b> – An input-output model that calculates Scope 1 and "
         "Scope 2 emissions, financial risk, and the impact of free allowances.\n\n"
-        "3. **CBAM Calculator** – A full compliance tool that separates internal and imported "
+        "3. <b>CBAM Calculator</b> – A full compliance tool that separates internal and imported "
         "(precursor) emissions, calculates embedded emissions per tonne, and estimates CBAM "
         "liability based on EU benchmark values.\n\n"
-        "The methodology is built on research collaboration with **Prof. Enrico Zio (Politecnico di Milano)** "
-        "and the LASAR³ laboratory, with a publication under review in **IEEE Transactions on Reliability**."
+        "The methodology is built on the <b>Aramis Alfa-Pulse Stochastic Kernel</b>, developed "
+        "in collaboration with <b>Prof. Enrico Zio (Politecnico di Milano)</b>, with a publication "
+        "under review in <b>IEEE Transactions on Reliability</b>."
     )
 
 def generate_risk_interpretation(summary_data):
@@ -596,27 +597,27 @@ def generate_recommendations(summary_data):
     recommendation = summary_data.get('ppa_recommendation', 'WAIT')
     
     recs = []
-    recs.append("1. **PPA Strategy**: " + (f"Proceed with PPA purchase – expected savings of €{summary_data.get('ppa_savings', 0):,.2f}." 
+    recs.append("1. <b>PPA Strategy</b>: " + (f"Proceed with PPA purchase – expected savings of €{summary_data.get('ppa_savings', 0):,.2f}." 
                 if recommendation == "✅ BUY PPA" else f"Wait for more favorable market conditions. Re-evaluate in 2-3 months."))
     
     if risk > 30000:
-        recs.append("2. **Operational Stability**: Implement predictive maintenance protocols to reduce unplanned outages and Scope 1 emissions. Target: 20% reduction in outage frequency.")
+        recs.append("2. <b>Operational Stability</b>: Implement predictive maintenance protocols to reduce unplanned outages and Scope 1 emissions. Target: 20% reduction in outage frequency.")
     else:
-        recs.append("2. **Operational Stability**: Maintain current performance. Continue monitoring anomaly detection alerts to prevent deterioration.")
+        recs.append("2. <b>Operational Stability</b>: Maintain current performance. Continue monitoring anomaly detection alerts to prevent deterioration.")
     
     if cbam > 50000:
-        recs.append("3. **Supply Chain Optimization**: Audit imported material suppliers and prioritize those with lower carbon intensity. Target: 15% reduction in imported emissions.")
+        recs.append("3. <b>Supply Chain Optimization</b>: Audit imported material suppliers and prioritize those with lower carbon intensity. Target: 15% reduction in imported emissions.")
     elif cbam > 0:
-        recs.append("3. **Supply Chain Optimization**: Review supplier emissions data. Negotiate with current suppliers for improved carbon performance.")
+        recs.append("3. <b>Supply Chain Optimization</b>: Review supplier emissions data. Negotiate with current suppliers for improved carbon performance.")
     else:
-        recs.append("3. **Supply Chain Optimization**: Maintain current supplier relationships. Continue monitoring for benchmark changes.")
+        recs.append("3. <b>Supply Chain Optimization</b>: Maintain current supplier relationships. Continue monitoring for benchmark changes.")
     
     if cascade:
-        recs.append("4. **Cascade Alert Response**: A cascade was detected in this simulation. Implement immediate root-cause analysis and review maintenance protocols.")
+        recs.append("4. <b>Cascade Alert Response</b>: A cascade was detected in this simulation. Implement immediate root-cause analysis and review maintenance protocols.")
     else:
-        recs.append("4. **Cascade Alert Response**: No cascade detected. Current operations appear stable.")
+        recs.append("4. <b>Cascade Alert Response</b>: No cascade detected. Current operations appear stable.")
     
-    recs.append(f"5. **Regular Review**: Schedule quarterly reviews to track progress against these recommendations and adjust strategy as market conditions evolve.")
+    recs.append(f"5. <b>Regular Review</b>: Schedule quarterly reviews to track progress against these recommendations and adjust strategy as market conditions evolve.")
     
     return "\n\n".join(recs)
 
@@ -689,7 +690,7 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(f"Prepared for: {summary_data.get('client_name', 'Valued Client')}", styles['Normal']))
     story.append(Paragraph(f"Date: {datetime.now().strftime('%d %B %Y')}", styles['Normal']))
-    story.append(Paragraph(f"Prepared by: Ognjen Raketić, M.Sc.", styles['Normal']))
+    story.append(Paragraph(f"Prepared by: Ognjen Raketic, M.Sc.", styles['Normal']))   # ISPRAVLJENO
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph("Confidential – For Internal Use Only", styles['Normal']))
     story.append(PageBreak())
@@ -836,7 +837,7 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
         story.append(Paragraph(scenario_text, body_style))
         story.append(PageBreak())
     
-    # 6. PARAMETERS
+    # 6. SIMULATION PARAMETERS
     story.append(Paragraph("6. SIMULATION PARAMETERS", section_style))
     story.append(Spacer(1, 0.2*cm))
     
@@ -869,20 +870,20 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
     story.append(table)
     story.append(PageBreak())
     
-    # 7. APPENDIX
+    # 7. APPENDIX – TECHNICAL NOTE
     story.append(Paragraph("7. APPENDIX – TECHNICAL NOTE", section_style))
     story.append(Spacer(1, 0.2*cm))
     story.append(Paragraph("The Carbon Shield framework is built on the following technical foundations:", body_style))
     story.append(Spacer(1, 0.1*cm))
     
     appendix_items = [
-        "• **Aramis Alfa-Pulse Kernel**: Self-exciting Hawkes-Merton stochastic process for anomaly detection in multi-component systems.",
-        "• **Validation**: Tested on 30M Monte Carlo paths with verified latency of 1,499.9 ns.",
-        "• **Benchmark**: Aramis Data Challenge timeliness score A = 0.1554.",
-        "• **Academic Collaboration**: Developed in collaboration with Prof. Enrico Zio (Politecnico di Milano).",
-        "• **Publication**: Under review at IEEE Transactions on Reliability.",
-        "• **Data Sources**: EUA prices from Yahoo Finance (KEUA/KRBN/CTWO), CBAM benchmarks from EU regulation.",
-        "• **Compliance**: Aligned with CBAM Regulation (2023/956) and EU ETS Directive (2003/87/EC)."
+        "• <b>Aramis Alfa-Pulse Kernel</b>: Self-exciting Hawkes-Merton stochastic process for anomaly detection in multi-component systems.",
+        "• <b>Validation</b>: Tested on 30M Monte Carlo paths with verified latency of 1,499.9 ns.",
+        "• <b>Benchmark</b>: Aramis Data Challenge timeliness score A = 0.1554.",
+        "• <b>Academic Collaboration</b>: Developed in collaboration with Prof. Enrico Zio (Politecnico di Milano).",
+        "• <b>Publication</b>: Under review at IEEE Transactions on Reliability.",
+        "• <b>Data Sources</b>: EUA prices from Yahoo Finance (KEUA/KRBN/CTWO), CBAM benchmarks from EU regulation.",
+        "• <b>Compliance</b>: Aligned with CBAM Regulation (2023/956) and EU ETS Directive (2003/87/EC)."
     ]
     
     for item in appendix_items:
@@ -907,7 +908,7 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
         alignment=0
     )
     story.append(Paragraph(
-        f"Generated by Carbon Shield v3.1 | Ognjen Raketić, M.Sc. | {datetime.now().strftime('%Y')}",
+        f"Generated by Carbon Shield v3.1 | Ognjen Raketic, M.Sc. | {datetime.now().strftime('%Y')}",
         footer_style
     ))
     
