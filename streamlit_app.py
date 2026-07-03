@@ -1,6 +1,6 @@
 # ==============================================================================
 # CARBON SHIELD – EU ETS + CBAM Risk Management Tool
-# Streamlit Application – Version 3.2 (Boutique Consultant Edition)
+# Streamlit Application – Version 3.3 (Boutique Consultant Edition – With Graphs)
 # ==============================================================================
 
 import streamlit as st
@@ -19,8 +19,9 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from reportlab.lib.units import cm
+import base64
 warnings.filterwarnings("ignore")
 
 # ==============================================================================
@@ -92,7 +93,7 @@ CONFIG = {
 }
 
 # ==============================================================================
-# 1. CORE CLASSES
+# 1. CORE CLASSES (nepromenjeno)
 # ==============================================================================
 
 def get_live_eua_price():
@@ -495,7 +496,7 @@ class MLEKalibrator:
             }
 
 # ==============================================================================
-# 5. PDF REPORT GENERATOR – BOUTIQUE CONSULTANT EDITION
+# 5. PDF REPORT GENERATOR – BOUTIQUE CONSULTANT EDITION (with Graphs)
 # ==============================================================================
 
 def generate_executive_summary(summary_data):
@@ -621,18 +622,29 @@ def generate_recommendations(summary_data):
     
     return "\n\n".join(recs)
 
+def create_chart_image(fig, width=400, height=300):
+    """Convert matplotlib figure to ReportLab Image."""
+    # Save figure to bytes
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    
+    # Create ReportLab Image
+    img = Image(buf, width=width, height=height)
+    return img
+
 def generate_pdf_report(results_df, summary_data, scenario_results=None):
-    """Generate professional boutique consultant PDF report."""
+    """Generate professional boutique consultant PDF report with graphs."""
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
         pdf_path = tmp_file.name
     
     doc = SimpleDocTemplate(
         pdf_path,
         pagesize=A4,
-        rightMargin=2.5*cm,
-        leftMargin=2.5*cm,
-        topMargin=2.5*cm,
-        bottomMargin=2.5*cm
+        rightMargin=2.0*cm,
+        leftMargin=2.0*cm,
+        topMargin=2.0*cm,
+        bottomMargin=2.0*cm
     )
     
     styles = getSampleStyleSheet()
@@ -682,6 +694,15 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
         alignment=0
     )
     
+    # Style for table cells with colors
+    cell_style = ParagraphStyle(
+        'CellStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=12,
+        alignment=1  # Center
+    )
+    
     story = []
     
     # TITLE PAGE
@@ -701,8 +722,8 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
     story.append(Paragraph(generate_executive_summary(summary_data), body_style))
     story.append(Spacer(1, 0.3*cm))
     
-    # Key metrics table with HTML color tags (no emojis)
-    def get_status_text(value, green_threshold, yellow_threshold):
+    # Key metrics table with colored circles using Paragraph objects
+    def get_status_text_color(value, green_threshold, yellow_threshold):
         if value == 0 or value < green_threshold:
             return '<font color="green">●</font> Good'
         elif value < yellow_threshold:
@@ -715,29 +736,32 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
     lambda_avg = summary_data.get('lambda_avg', 0)
     cascade = summary_data.get('cascade', False)
     
+    # Build table with Paragraph objects for color rendering
     metrics_data = [
-        ["Metric", "Value", "Status"],
-        ["Total Carbon Footprint", f"{summary_data.get('total_carbon', 0):,.2f} tCO2e", "Baseline"],
-        ["ETS Financial Risk", f"€{ets_risk:,.2f}", get_status_text(ets_risk, 1, 30000)],
-        ["CBAM Liability", f"€{cbam_liability:,.2f}", get_status_text(cbam_liability, 1, 50000)],
-        ["Average Lambda", f"{lambda_avg:.3f}", '<font color="green">●</font> Normal' if lambda_avg < 0.85 else '<font color="red">●</font> High'],
-        ["Cascade Detected", "YES" if cascade else "NO", '<font color="red">●</font> Detected' if cascade else '<font color="green">●</font> None'],
-        ["PPA Recommendation", summary_data.get('ppa_recommendation', 'WAIT'), ""],
-        ["Total PPA Savings", f"€{summary_data.get('ppa_savings', 0):,.2f}", ""]
+        [Paragraph("Metric", cell_style), Paragraph("Value", cell_style), Paragraph("Status", cell_style)],
+        [Paragraph("Total Carbon Footprint", cell_style), Paragraph(f"{summary_data.get('total_carbon', 0):,.2f} tCO2e", cell_style), Paragraph("Baseline", cell_style)],
+        [Paragraph("ETS Financial Risk", cell_style), Paragraph(f"€{ets_risk:,.2f}", cell_style), Paragraph(get_status_text_color(ets_risk, 1, 30000), cell_style)],
+        [Paragraph("CBAM Liability", cell_style), Paragraph(f"€{cbam_liability:,.2f}", cell_style), Paragraph(get_status_text_color(cbam_liability, 1, 50000), cell_style)],
+        [Paragraph("Average Lambda", cell_style), Paragraph(f"{lambda_avg:.3f}", cell_style), Paragraph('<font color="green">●</font> Normal' if lambda_avg < 0.85 else '<font color="red">●</font> High', cell_style)],
+        [Paragraph("Cascade Detected", cell_style), Paragraph("YES" if cascade else "NO", cell_style), Paragraph('<font color="red">●</font> Detected' if cascade else '<font color="green">●</font> None', cell_style)],
+        [Paragraph("PPA Recommendation", cell_style), Paragraph(summary_data.get('ppa_recommendation', 'WAIT'), cell_style), Paragraph("", cell_style)],
+        [Paragraph("Total PPA Savings", cell_style), Paragraph(f"€{summary_data.get('ppa_savings', 0):,.2f}", cell_style), Paragraph("", cell_style)]
     ]
     
-    table = Table(metrics_data, colWidths=[5*cm, 4*cm, 3*cm])
+    table = Table(metrics_data, colWidths=[4.5*cm, 4.5*cm, 4.5*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5276')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('FONTSIZE', (0, 1), (-1, -1), 9),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
     ]))
     story.append(table)
     story.append(PageBreak())
@@ -804,9 +828,72 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
             story.append(Spacer(1, 0.1*cm))
     story.append(PageBreak())
     
-    # 5. SCENARIO ANALYSIS (if available)
+    # 5. GRAPHS – Simulation Charts
+    story.append(Paragraph("5. SIMULATION CHARTS", section_style))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph("The following charts visualize the key simulation results over time:", body_style))
+    story.append(Spacer(1, 0.3*cm))
+    
+    # Create and add the 5 plots as images
+    try:
+        # Create figure with 5 subplots
+        fig, axes = plt.subplots(5, 1, figsize=(10, 12))
+        fig.subplots_adjust(hspace=0.4)
+        
+        # 1. Lambda
+        axes[0].plot(results_df["time"], results_df["lambda_avg"], label="avg lambda", color="blue", linewidth=2)
+        axes[0].plot(results_df["time"], results_df["lambda_max"], label="max lambda", color="red", linestyle="--", linewidth=1.5)
+        axes[0].axhline(y=summary_data.get('trigger_threshold', 0.65), color="gray", linestyle=":", label="trigger threshold", linewidth=1)
+        axes[0].set_ylabel("Lambda", fontsize=10)
+        axes[0].legend(loc="upper right", fontsize=8)
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_ylim(0, max(1.0, results_df["lambda_max"].max() * 1.1))
+        
+        # 2. Carbon
+        axes[1].plot(results_df["time"], results_df["total_carbon"], label="Total Carbon (tCO2e)", color="green", linewidth=2)
+        axes[1].set_ylabel("tCO2e", fontsize=10)
+        axes[1].legend(loc="upper right", fontsize=8)
+        axes[1].grid(True, alpha=0.3)
+        
+        # 3. Risk
+        axes[2].plot(results_df["time"], results_df["risk_eur"], label="Financial Risk (EUR)", color="magenta", linewidth=2)
+        axes[2].set_ylabel("EUR", fontsize=10)
+        axes[2].legend(loc="upper right", fontsize=8)
+        axes[2].grid(True, alpha=0.3)
+        
+        # 4. CBAM Liability
+        axes[3].plot(results_df["time"], results_df["cbam_liability"], label="CBAM Liability (EUR)", color="orange", linewidth=2)
+        axes[3].set_ylabel("EUR", fontsize=10)
+        axes[3].legend(loc="upper right", fontsize=8)
+        axes[3].grid(True, alpha=0.3)
+        
+        # 5. Embedded emissions breakdown
+        axes[4].plot(results_df["time"], results_df["internal_emissions_per_tonne"], label="Internal", color="blue", linewidth=2)
+        axes[4].plot(results_df["time"], results_df["imported_emissions_per_tonne"], label="Imported (precursor)", color="red", linestyle="--", linewidth=2)
+        axes[4].plot(results_df["time"], results_df["embedded_emissions_per_tonne"], label="Total embedded", color="green", linewidth=2)
+        axes[4].axhline(y=summary_data.get('benchmark_used', 1.328), color="gray", linestyle=":", label="CBAM benchmark", linewidth=1)
+        axes[4].set_xlabel("Time step", fontsize=10)
+        axes[4].set_ylabel("tCO2 / tonne", fontsize=10)
+        axes[4].legend(loc="upper right", fontsize=8)
+        axes[4].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Convert to image and add to PDF
+        img = create_chart_image(fig, width=450, height=500)
+        story.append(img)
+        plt.close(fig)
+        story.append(Spacer(1, 0.3*cm))
+        story.append(Paragraph("Figure 1: Simulation results over time – Lambda, Carbon, Financial Risk, CBAM Liability, and Embedded Emissions.", body_style))
+        
+    except Exception as e:
+        story.append(Paragraph(f"Note: Could not generate charts: {str(e)}", body_style))
+    
+    story.append(PageBreak())
+    
+    # 6. SCENARIO ANALYSIS (if available)
     if scenario_results:
-        story.append(Paragraph("5. SCENARIO ANALYSIS", section_style))
+        story.append(Paragraph("6. SCENARIO ANALYSIS", section_style))
         story.append(Spacer(1, 0.2*cm))
         story.append(Paragraph("The following table compares three scenarios (Optimistic, Base, Pessimistic):", body_style))
         story.append(Spacer(1, 0.2*cm))
@@ -821,7 +908,7 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
                 f"{metrics.get('lambda_avg', 0):.3f}"
             ])
         
-        table = Table(scenario_data, colWidths=[3.5*cm, 3*cm, 3*cm, 3*cm, 3*cm])
+        table = Table(scenario_data, colWidths=[3.2*cm, 3.2*cm, 3.2*cm, 3.2*cm, 3.2*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a5276')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -849,8 +936,8 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
         story.append(Paragraph(scenario_text, body_style))
         story.append(PageBreak())
     
-    # 6. SIMULATION PARAMETERS
-    story.append(Paragraph("6. SIMULATION PARAMETERS", section_style))
+    # 7. SIMULATION PARAMETERS
+    story.append(Paragraph("7. SIMULATION PARAMETERS", section_style))
     story.append(Spacer(1, 0.2*cm))
     
     params_data = [
@@ -882,8 +969,8 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
     story.append(table)
     story.append(PageBreak())
     
-    # 7. APPENDIX – TECHNICAL NOTE
-    story.append(Paragraph("7. APPENDIX – TECHNICAL NOTE", section_style))
+    # 8. APPENDIX – TECHNICAL NOTE
+    story.append(Paragraph("8. APPENDIX – TECHNICAL NOTE", section_style))
     story.append(Spacer(1, 0.2*cm))
     story.append(Paragraph("The Carbon Shield framework is built on the following technical foundations:", body_style))
     story.append(Spacer(1, 0.1*cm))
@@ -920,7 +1007,7 @@ def generate_pdf_report(results_df, summary_data, scenario_results=None):
         alignment=0
     )
     story.append(Paragraph(
-        f"Generated by Carbon Shield v3.2 | Ognjen Raketic, M.Sc. | {datetime.now().strftime('%Y')}",
+        f"Generated by Carbon Shield v3.3 | Ognjen Raketic, M.Sc. | {datetime.now().strftime('%Y')}",
         footer_style
     ))
     
@@ -1175,7 +1262,6 @@ def main():
                     "imported": last["imported_emissions_per_tonne"],
                     "embedded": last["embedded_emissions_per_tonne"],
                     "benchmark_used": last["benchmark_used"],
-                    # Additional metadata for PDF
                     "prod_vol": prod_vol,
                     "eua_price": eua_price,
                     "free_alloc": free_alloc,
@@ -1230,7 +1316,6 @@ def main():
                 total_savings = savings + energy_cost_savings
                 recommendation = "✅ BUY PPA" if total_savings > 0 else "⚠️ WAIT"
 
-                # Store PPA for PDF
                 st.session_state['current_metadata']['ppa_recommendation'] = recommendation
                 st.session_state['current_metadata']['risk_without_ppa'] = result_no_ppa["risk_eur"]
                 st.session_state['current_metadata']['risk_with_ppa'] = result_ppa["risk_eur"]
@@ -1257,7 +1342,7 @@ def main():
                 else:
                     st.warning(f"⚠️ Recommendation: **WAIT** – PPA would cost **{abs(total_savings):,.2f} EUR** more than spot")
 
-                # Plots
+                # Plots in Streamlit (existing functionality)
                 st.markdown("---")
                 st.subheader("📈 Simulation Charts")
                 fig, axes = plt.subplots(5, 1, figsize=(12, 14), sharex=True)
@@ -1497,9 +1582,8 @@ def main():
     # ==============================================================
     if pdf_report_button:
         if st.session_state['current_df'] is not None and st.session_state['current_metadata'] is not None:
-            with st.spinner("📑 Generating boutique consultant report..."):
+            with st.spinner("📑 Generating boutique consultant report with graphs..."):
                 try:
-                    # Get scenario results if available
                     scenario_results = st.session_state.get('scenario_results', None)
                     
                     pdf_path = generate_pdf_report(
@@ -1508,7 +1592,7 @@ def main():
                         scenario_results
                     )
                     display_pdf_download_button(pdf_path)
-                    st.success("✅ Boutique Consultant Report generated successfully!")
+                    st.success("✅ Boutique Consultant Report with Graphs generated successfully!")
                 except Exception as e:
                     st.error(f"❌ Error generating PDF: {str(e)}")
         else:
