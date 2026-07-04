@@ -1,3 +1,4 @@
+pip install -r requirements.txt
 streamlit>=1.28.0
 numpy>=1.24.0
 pandas>=2.0.0
@@ -7,5 +8,4 @@ yfinance>=0.2.0
 scipy>=1.10.0
 scikit-learn>=1.2.0
 reportlab>=4.0.0
-tirex-2
-pip install -r requirements.txt
+tirex-2>=1.0.0
