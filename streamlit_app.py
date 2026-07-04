@@ -2,7 +2,6 @@
 # CARBON SHIELD – EU ETS + CBAM Risk Management Tool
 # Streamlit Application – Version 3.4 (TiRex-2 Integrated)
 # ==============================================================================
-pip install tirex-2
 import streamlit as st
 import numpy as np
 import pandas as pd
