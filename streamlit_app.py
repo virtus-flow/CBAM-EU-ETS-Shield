@@ -21,6 +21,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image
 from reportlab.lib.units import cm
 import base64
+import torch   # <--- DODATO
 
 # --- Pokušaj uvoza TiRex-2 (opciono) ---
 try:
@@ -1100,7 +1101,7 @@ def display_pdf_download_button(pdf_path):
         data=pdf_bytes,
         file_name=f"carbon_shield_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
         mime="application/pdf",
-        use_container_width=True
+        width='stretch'   # <--- ZAMENJENO use_container_width
     )
 
     try:
@@ -1255,16 +1256,16 @@ def main():
         # Main buttons
         col1, col2 = st.columns(2)
         with col1:
-            run_button = st.button("🚀 Run Simulation", use_container_width=True, type="primary")
+            run_button = st.button("🚀 Run Simulation", width='stretch', type="primary")   # <--- ZAMENJENO
         with col2:
-            scenario_button = st.button("📊 3 Scenarios", use_container_width=True)
+            scenario_button = st.button("📊 3 Scenarios", width='stretch')                # <--- ZAMENJENO
 
         st.markdown("---")
         st.subheader("📊 Advanced Features")
 
         upload_historical = st.checkbox("📁 Upload Historical Data")
-        calibrate_button = st.button("🔬 Calibrate Model", use_container_width=True)
-        pdf_report_button = st.button("📑 Generate Boutique Report", use_container_width=True)
+        calibrate_button = st.button("🔬 Calibrate Model", width='stretch')                # <--- ZAMENJENO
+        pdf_report_button = st.button("📑 Generate Boutique Report", width='stretch')      # <--- ZAMENJENO
 
     # ==============================================================
     # HISTORICAL DATA UPLOAD
@@ -1517,7 +1518,7 @@ def main():
                     data=csv,
                     file_name=f"carbon_shield_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width='stretch'   # <--- ZAMENJENO
                 )
                 st.success("✅ Simulation completed successfully!")
 
@@ -1679,7 +1680,7 @@ def main():
                     data=csv_all,
                     file_name=f"scenario_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width='stretch'   # <--- ZAMENJENO
                 )
 
                 st.success("✅ 3-Scenario analysis completed successfully!")
